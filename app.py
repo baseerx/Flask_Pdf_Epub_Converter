@@ -10,7 +10,11 @@ import tempfile
 import shutil
 import uuid
 app = Flask(__name__)
-CORS(app, support_credentials=True)
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 megabytes
+
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+
 @app.route('/')
 def home():
     return 'Home Page'
@@ -19,8 +23,6 @@ def home():
 @app.route('/hello/<name>')
 def hello_name(name):
     return f'Hello {name}'
-
-
 
 
 @app.route('/convert_file')
@@ -136,7 +138,6 @@ def convert_pdf_to_epub():
 
 
 @app.route('/convert_file_test')
-@cross_origin(origin='*')
 def convert_pdf_to_epub_test():
     pdf_path = os.path.join(app.root_path, 'static', 'filesample.pdf')
     try:
@@ -149,11 +150,11 @@ def convert_pdf_to_epub_test():
 
 
 @app.route('/api/convert_file/<file>', methods=['GET'])
-@cross_origin(origin='*')
 def convert_pdf_to_epub_api(file):
     # Paths for the PDF and EPUB files
     pdf_path = os.path.join(app.root_path, 'static', file)
-    epub_path = os.path.join(app.root_path, 'static', pdf_path.split("/")[-1].replace('.pdf', '.epub'))
+    epub_path = os.path.join(app.root_path, 'static',
+                             pdf_path.split("/")[-1].replace('.pdf', '.epub'))
 
     # Open the PDF document
     try:
@@ -171,6 +172,7 @@ def convert_pdf_to_epub_api(file):
 
     # Initialize a variable to track if any content was added
     content_added = False
+    chapters = []
 
     # Process each page in the PDF document
     for page_num in range(len(doc)):
@@ -225,14 +227,15 @@ def convert_pdf_to_epub_api(file):
 
             # Add chapter to the book
             book.add_item(chapter)
+            chapters.append(chapter)
 
     # Check if any content was added to the book
     if not content_added:
         return "Error: No content found in the PDF!", 500
 
     # Define Table Of Contents
-    book.toc = tuple(epub.Link(f'chapter_{
-                     i + 1}.xhtml', f'Chapter {i + 1}', f'chapter_{i + 1}') for i in range(len(book.items)))
+    book.toc = tuple(epub.Link(chapter.file_name, chapter.title,
+                     chapter.file_name) for chapter in chapters)
 
     # Add default NCX and Nav file
     book.add_item(epub.EpubNcx())
@@ -252,7 +255,7 @@ def convert_pdf_to_epub_api(file):
     book.add_item(nav_css)
 
     # Basic spine
-    book.spine = ['nav'] + [f'chapter_{i + 1}' for i in range(len(book.items))]
+    book.spine = ['nav'] + chapters
 
     # Write the EPUB book to file
     epub.write_epub(epub_path, book, {})
@@ -261,9 +264,7 @@ def convert_pdf_to_epub_api(file):
 
 
 
-
 @app.route('/api/move_file', methods=['POST'])
-@cross_origin(origin='*')
 def move_file():
     try:
         # Check if the POST request has the file part
@@ -278,23 +279,22 @@ def move_file():
 
         # Generate a unique filename to avoid conflicts
         filename = file.filename
-        
+
         # Save the file to the static folder
         target_folder = os.path.join(app.root_path, 'static')
+        if not os.path.exists(target_folder):
+            os.makedirs(target_folder)
         target_file_path = os.path.join(target_folder, filename)
 
         # Move the file to the target folder
         file.save(target_file_path)
-        #want to directly download it 
-        return jsonify({'filename': filename}), 200
 
+        # Return the filename and the file path for direct download
+        return jsonify({'filename': filename, 'file_url': url_for('static', filename=filename, _external=True)}), 200
 
     except Exception as e:
         return str(e), 500
-    except Exception as e:
-        return str(e), 500
-
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0',port:9000, debug=False)
+    app.run(host='0.0.0.0', port='9000', debug=False)
